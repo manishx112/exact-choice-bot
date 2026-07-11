@@ -39,16 +39,10 @@ function ProductImg({ id, style }: { id: string; style: number | string }) {
 }
 
 function Card({ r }: { r: Jean }) {
-  const soldOut = r.stock === 0;
   return (
     <div className="bg-white rounded-xl overflow-hidden border border-amber-100 shadow-sm w-36 flex-shrink-0">
       <div className="h-40 bg-amber-50 flex items-center justify-center overflow-hidden relative">
         <ProductImg id={r.img} style={r.s} />
-        {soldOut && (
-          <span className="absolute top-1 left-1 bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded">
-            Out
-          </span>
-        )}
       </div>
       <div className="p-2">
         <div className="flex items-baseline justify-between">
