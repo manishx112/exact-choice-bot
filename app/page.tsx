@@ -50,9 +50,7 @@ function Card({ r }: { r: Jean }) {
           <span className="text-xs text-gray-400">Gr {r.g}</span>
         </div>
         <div className="text-amber-600 font-extrabold text-lg leading-tight">₹{r.rate}</div>
-        <div className="text-[11px] text-gray-500">
-          {r.size} · {r.stock == null ? "stock —" : r.stock > 0 ? `${r.stock} pcs` : "0 pcs"}
-        </div>
+        <div className="text-[11px] text-gray-500">{r.size}</div>
       </div>
     </div>
   );
