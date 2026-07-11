@@ -132,60 +132,70 @@ export default function Home() {
   const chips = ["28x32 me 300 range", "26x30 sabse sasta", "32x40 stock me", "28x34 under 460"];
 
   return (
-    <div className="min-h-[100dvh] bg-gradient-to-b from-amber-50 to-orange-50 flex items-center justify-center sm:p-4">
-      <div className="w-full max-w-md bg-orange-50 sm:rounded-2xl shadow-xl overflow-hidden flex flex-col h-[100dvh] sm:h-[640px]">
-        <div className="bg-gradient-to-r from-amber-500 to-orange-600 text-white px-4 py-3 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-xl">👳</div>
-          <div className="flex-1">
-            <div className="font-bold leading-tight">John DV — Jeans Wala Paaji</div>
-            <div className="text-[11px] text-amber-100 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 bg-green-300 rounded-full inline-block"></span>
-              Online
-            </div>
+    <div className="h-[100dvh] w-full overflow-hidden bg-gradient-to-b from-amber-50 to-orange-50 flex justify-center sm:items-center sm:p-6">
+      <div className="w-full sm:max-w-lg md:max-w-xl bg-orange-50 sm:rounded-2xl shadow-xl overflow-hidden flex flex-col h-[100dvh] sm:h-[85dvh] sm:max-h-[720px]">
+        <div
+          className="bg-gradient-to-r from-amber-500 to-orange-600 text-white px-4 py-3 flex items-center gap-3 shrink-0"
+          style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
+        >
+          <div className="relative w-10 h-10 shrink-0">
+            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-xl">👳</div>
+            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 border-2 border-orange-600 rounded-full"></span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-bold leading-tight truncate">John DV — Jeans Wala Paaji</div>
+            <div className="text-[11px] text-amber-100">Online</div>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 chat-scroll">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 chat-scroll">
           {messages.map((m, i) => (
             <Bubble key={i} m={m} />
           ))}
           {loading && (
             <div className="flex justify-start mb-3">
-              <div className="bg-white border border-amber-100 px-4 py-2 rounded-2xl rounded-bl-sm text-sm text-gray-400">
-                type kar raha hai…
+              <div className="bg-white border border-amber-100 px-4 py-2.5 rounded-2xl rounded-bl-sm text-sm text-gray-400 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce"></span>
               </div>
             </div>
           )}
           <div ref={endRef} />
         </div>
 
-        <div className="px-3 pb-1 flex gap-1.5 flex-wrap">
-          {chips.map((c) => (
-            <button
-              key={c}
-              onClick={() => setInput(c)}
-              className="text-[11px] bg-white border border-amber-200 text-amber-700 px-2 py-1 rounded-full hover:bg-amber-100"
-            >
-              {c}
-            </button>
-          ))}
-        </div>
+        <div className="shrink-0 border-t border-amber-100 bg-orange-50">
+          <div className="px-3 pt-2 flex gap-1.5 overflow-x-auto no-scrollbar">
+            {chips.map((c) => (
+              <button
+                key={c}
+                onClick={() => setInput(c)}
+                className="shrink-0 text-[11px] bg-white border border-amber-200 text-amber-700 px-2.5 py-1 rounded-full hover:bg-amber-100 active:scale-95 transition"
+              >
+                {c}
+              </button>
+            ))}
+          </div>
 
-        <div className="p-3 flex gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && send()}
-            placeholder="Size te rate likho paaji..."
-            className="flex-1 px-4 py-2 rounded-full border border-amber-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-          />
-          <button
-            onClick={send}
-            disabled={loading}
-            className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white w-10 h-10 rounded-full flex items-center justify-center"
+          <div
+            className="p-3 flex gap-2"
+            style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
           >
-            ➤
-          </button>
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && send()}
+              placeholder="Size te rate likho paaji..."
+              className="flex-1 min-w-0 px-4 py-2.5 rounded-full border border-amber-200 text-base sm:text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+            />
+            <button
+              onClick={send}
+              disabled={loading}
+              className="bg-amber-500 hover:bg-amber-600 active:scale-95 disabled:opacity-50 text-white w-11 h-11 shrink-0 rounded-full flex items-center justify-center transition"
+            >
+              ➤
+            </button>
+          </div>
         </div>
       </div>
     </div>
