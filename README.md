@@ -1,6 +1,6 @@
-# John DV — Chat Support (Next.js)
+# John DV — Delhi Jeans Wholesale Chat Support (Next.js)
 
-Punjabi-persona jeans chat bot. Size + rate samajh ke live sheet data se
+Delhi/UP wholesale expert persona jeans chat bot. Size + rate samajh ke live sheet data se
 product cards dikhata hai. Data ka source-of-truth deterministic filter hai
 (LLM sirf intent nikaalta hai, price/style kabhi hallucinate nahi hota).
 

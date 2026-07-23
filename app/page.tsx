@@ -87,7 +87,7 @@ export default function Home() {
     {
       role: "bot",
       text:
-        'Sat Sri Akaal paaji 🙏 John DV te tuhada swagat! Dasso — konsa size te kinne rate de jeans chahide? (jaise: "28x32 me 300 range wale dikha do")',
+        'Namaste bhaiya! 🙏 John DV Jeans Wholesale me aapka swagat hai. Konsa size aur kis rate range me jeans lot chahiye? (jaise: "28x32 me 300 range wale dikha do")',
     },
   ]);
   const [input, setInput] = useState("");
@@ -106,16 +106,23 @@ export default function Home() {
     setInput("");
     setLoading(true);
     try {
+      // Build chat history from last 6 messages for context
+      const recentMsgs = [...messages, { role: "user" as const, text: q }];
+      const history = recentMsgs.slice(-6).map((m) => ({
+        role: m.role,
+        text: m.text,
+      }));
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: q, prevIntent: lastIntent }),
+        body: JSON.stringify({ message: q, prevIntent: lastIntent, history }),
       });
       const data = await res.json();
       setMessages((m) => [...m, { role: "bot", text: data.reply, cards: data.cards }]);
-      if (data.intent) setLastIntent(data.intent); // greeting/chit-chat turns na overwrite kare context
+      if (data.intent) setLastIntent(data.intent);
     } catch {
-      setMessages((m) => [...m, { role: "bot", text: "Oye net thoda slow hai 😅 dobara bhejo." }]);
+      setMessages((m) => [...m, { role: "bot", text: "Bhaiya network slow lag raha hai 😅 ek baar dobara bhejiye." }]);
     } finally {
       setLoading(false);
     }
@@ -131,11 +138,13 @@ export default function Home() {
           style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
         >
           <div className="relative w-10 h-10 shrink-0">
-            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-xl">👳</div>
+            <div className="w-10 h-10 rounded-full bg-white p-0.5 flex items-center justify-center overflow-hidden shadow-inner">
+              <img src="/avatar.svg" alt="John DV Logo" className="w-full h-full object-contain" />
+            </div>
             <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-400 border-2 border-orange-600 rounded-full"></span>
           </div>
           <div className="flex-1 min-w-0">
-            <div className="font-bold leading-tight truncate">John DV — Jeans Wala Paaji</div>
+            <div className="font-bold leading-tight truncate">John DV — Jeans Wholesale Expert</div>
             <div className="text-[11px] text-amber-100">Online</div>
           </div>
         </div>
@@ -170,15 +179,27 @@ export default function Home() {
           </div>
 
           <div
-            className="p-3 flex gap-2"
+            className="p-3 flex gap-2 items-end"
             style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
           >
-            <input
+            <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && send()}
-              placeholder="Size te rate likho paaji..."
-              className="flex-1 min-w-0 px-4 py-2.5 rounded-full border border-amber-200 text-base sm:text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              placeholder="Size aur rate range bataiye bhaiya..."
+              rows={1}
+              onInput={(e) => {
+                const el = e.currentTarget;
+                el.style.height = "auto";
+                el.style.height = Math.min(el.scrollHeight, 120) + "px";
+              }}
+              className="flex-1 min-w-0 px-4 py-2.5 rounded-2xl border border-amber-200 text-base sm:text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-400 resize-none overflow-y-auto leading-snug"
+              style={{ maxHeight: "120px" }}
             />
             <button
               onClick={send}
