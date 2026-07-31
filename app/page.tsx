@@ -39,6 +39,8 @@ function ProductImg({ id, style }: { id: string; style: number | string }) {
 }
 
 function Card({ r }: { r: Jean }) {
+  // "Gr B" customer ko kuch nahi batata — seedha Gents/Ladies likho
+  const cat = r.g === "Male" ? "Gents" : "Ladies";
   return (
     <div className="bg-white rounded-xl overflow-hidden border border-amber-100 shadow-sm w-36 flex-shrink-0">
       <div className="h-40 bg-amber-50 flex items-center justify-center overflow-hidden relative">
@@ -47,10 +49,10 @@ function Card({ r }: { r: Jean }) {
       <div className="p-2">
         <div className="flex items-baseline justify-between">
           <span className="font-bold text-gray-800 text-sm">#{r.s}</span>
-          <span className="text-xs text-gray-400">Gr {r.g}</span>
+          <span className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full">{cat}</span>
         </div>
         <div className="text-amber-600 font-extrabold text-lg leading-tight">₹{r.rate}</div>
-        <div className="text-[11px] text-gray-500">{r.size}</div>
+        <div className="text-[11px] text-gray-500">Size {r.size} · per pc</div>
       </div>
     </div>
   );
@@ -62,7 +64,7 @@ function Bubble({ m }: { m: Msg }) {
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-3`}>
       <div className={`max-w-[85%] ${isUser ? "order-2" : ""}`}>
         <div
-          className={`px-4 py-2 rounded-2xl text-sm ${
+          className={`px-4 py-2 rounded-2xl text-sm whitespace-pre-wrap leading-relaxed ${
             isUser
               ? "bg-amber-500 text-white rounded-br-sm"
               : "bg-white text-gray-800 rounded-bl-sm border border-amber-100"
@@ -87,17 +89,24 @@ export default function Home() {
     {
       role: "bot",
       text:
-        'Namaste bhaiya! 🙏 John DV Jeans Wholesale me aapka swagat hai. Konsa size aur kis rate range me jeans lot chahiye? (jaise: "28x32 me 300 range wale dikha do")',
+        "Namaste bhaiya! 🙏 John DV Jeans Wholesale, Gandhi Nagar Delhi.\nGents aur ladies dono ka fresh lot ready hai.\nAapko kaunsa size chahiye? Rate range bhi bata dijiye, turant photo bhej deta hoon.",
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [lastIntent, setLastIntent] = useState<Intent | null>(null);
+  // jo card ek baar dikh gaya, "aur dikhao" par dobara na jaaye
+  const shownKeys = useRef<string[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  // chat khulte hi stock list server par cache ho jaaye
+  useEffect(() => {
+    fetch("/api/chat").catch(() => {});
+  }, []);
 
   const send = async () => {
     const q = input.trim();
@@ -116,10 +125,23 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: q, prevIntent: lastIntent, history }),
+        body: JSON.stringify({
+          message: q,
+          prevIntent: lastIntent,
+          history,
+          shownKeys: shownKeys.current.slice(-60),
+          // "ye kitne ka padega" ka jawaab inhi cards par milega
+          lastCards: [...messages].reverse().find((m) => m.cards?.length)?.cards ?? [],
+          // abhi abhi cards bheje the? "theek hai" par dobara na bheje
+          lastBotHadCards: !!messages[messages.length - 1]?.cards?.length,
+        }),
       });
       const data = await res.json();
       setMessages((m) => [...m, { role: "bot", text: data.reply, cards: data.cards }]);
+      if (data.cards?.length) {
+        const fresh = data.cards.map((r: Jean) => `${r.s}|${r.size}`);
+        shownKeys.current = Array.from(new Set([...shownKeys.current, ...fresh]));
+      }
       if (data.intent) setLastIntent(data.intent);
     } catch {
       setMessages((m) => [...m, { role: "bot", text: "Bhaiya network slow lag raha hai 😅 ek baar dobara bhejiye." }]);
@@ -128,7 +150,13 @@ export default function Home() {
     }
   };
 
-  const chips = ["28x32 me 300 range", "26x30 sabse sasta", "32x40 stock me", "28x34 under 460"];
+  const chips = [
+    "28x34 gents dikhao",
+    "28x32 ladies 300 range",
+    "26x30 sabse sasta",
+    "kaun kaun se size hain?",
+    "delivery kitne din me",
+  ];
 
   return (
     <div className="h-[100dvh] w-full overflow-hidden bg-gradient-to-b from-amber-50 to-orange-50 flex justify-center sm:items-center sm:p-6">

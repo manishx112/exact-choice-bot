@@ -18,4 +18,9 @@ export interface Intent {
   inStock: boolean;
   gender: "male" | "female" | null;
   style: string | null; // ek specific style/reference no. lookup (jaise "1841 size dikha do")
+  // ye field ISI message me boli gayi thi ya pichhle se carry hui? Jo abhi boli
+  // gayi hai wo zyada important hai — maal na mile toh purani wali pehle chhodo.
+  saidSize?: boolean;
+  saidRate?: boolean;
+  saidGender?: boolean;
 }

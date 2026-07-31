@@ -1,8 +1,12 @@
 # John DV — Delhi Jeans Wholesale Chat Support (Next.js)
 
 Delhi/UP wholesale expert persona jeans chat bot. Size + rate samajh ke live sheet data se
-product cards dikhata hai. Data ka source-of-truth deterministic filter hai
-(LLM sirf intent nikaalta hai, price/style kabhi hallucinate nahi hota).
+product cards dikhata hai. Data ka source-of-truth deterministic filter hai —
+LLM sirf reply ko human banata hai, rate/size/count kabhi khud nahi banata.
+
+> ⚠️ Sheet me **Stock column hai hi nahi**. Isliye "stock hai kya" ko availability
+> ka sawaal maana jaata hai, filter nahi. (Pehle ye filter poora catalog kha jaata
+> tha aur bot har baar "kuch nahi mila" bolta tha.)
 
 ## Setup
 ```bash
@@ -40,16 +44,63 @@ curl -sI "https://drive.google.com/thumbnail?id=FILE_ID&sz=w600" | head -5
   Ya files ko personal Gmail Drive me le jao.
 
 ## Architecture
+
+**Sabse zaroori baat: LLM koi faisla nahi leta.** Wo sirf pehle se bana hua
+sacha jawaab natural Hinglish me dobara likhta hai. Isi wajah se bot na jhooth
+bolta hai, na har baat par photo thopta hai.
+
 ```
 page.tsx (chat UI)
-  → POST /api/chat
-      → fetch APPS_SCRIPT_URL (fresh data)
-      → intent: Groq (JSON-only) OR parseIntentJS
-      → filterData()  ← SOURCE OF TRUTH
-      → personaLine()
+  → POST /api/chat   { message, prevIntent, history, shownKeys, lastCards }
+      → getCatalog()        ← 5 min cache + stale-while-revalidate + in-flight dedup
+      → routeAction()       ← JS decide karta hai: chat / info / show
+      → parseIntentJS()     ← size, rate, gender, style — sab regex se (SOURCE OF TRUTH)
+      → filterAll()         ← deterministic filter
+      → draft banao         ← showLine / availabilityAnswer / detectFAQ / smallTalkLine
+      → polish()            ← Groq sirf draft ko human banata hai
+          └ numeric guard: draft me na ho aisa koi number aaya → draft hi bhejo
   → cards render (ProductImg = multi-format fallback)
 ```
 
+### Teen actions (`routeAction` in `lib/intent.ts`)
+| action | kab | cards |
+|---|---|---|
+| `chat` | hi / thanks / gaali / mol-bhaav / delivery / payment / MOQ / off-topic | **kabhi nahi** |
+| `info` | "28x32 hai kya", "rate kya chal raha", "kaun se size hain" | sirf style number par |
+| `show` | "dikhao", "photo bhejo", "aur dikhao", "26x30 sasta" | haan |
+
+Inse pehle teen special handler chalte hain (`route.ts` me, upar se neeche):
+`isLastLotQuestion` ("ye kitne ka padega"), `parseOrderQty` ("20 pcs bana do"),
+aur unknown style number.
+
+### Card repeat na ho — teen guard
+1. `shownKeys` — client har dikhaye card ka `style|size` bhejta hai, "aur dikhao"
+   par naye pieces nikalte hain. Ek baar me max 8 card.
+2. **Same-lot guard** — filter badla par result wahi nikla, toh photo dobara nahi
+   jaati (`sameLotLine`). "aur sasta" par yahi bachata hai.
+3. **Affirmation guard** — cards dikhne ke baad "haan / theek hai / ok" ka matlab
+   haami hai, naye photo ki demand nahi (`ackAfterCards`). Isliye
+   `botOfferedToShow` me "👇" match **mat** karna — wo har card reply me hota hai.
+
+### Purana filter naye sawaal par na chipke
+`Intent` me `saidSize` / `saidRate` batate hain ki field ISI message me boli gayi
+ya pichhle se carry hui. `checkAvailability()` ka relaxation ladder **pehle purani
+field chhodta hai**, phir taaza wali. Isi se "500 wale gents dikhao" par 3 message
+purana `28X32` hat jaata hai. `isCatalogQuestion()` ("kaun kaun se size hain")
+size+rate dono reset kar deta hai.
+
+### Jab maal na mile
+Ladder: purani field → budget → doosri category (gender) → size → sab kuch.
+Jo cards jaate hain reply unhi ke bare me hota hai, kabhi mismatch nahi.
+Budget **upar** hai ya **neeche** — dono ka jawaab alag hai.
+
+### Groq band ho toh?
+Sab kuch chalta rahega — `polish()` seedha draft lauta deta hai. Drafts already
+2-3 line ke human Hinglish jawaab hain.
+
 ## Intent tuning
-`lib/intent.ts` me `parseIntentJS` aur Groq prompt dono hain.
-Naye patterns (color, fit, group A/B filter) yahin add karo.
+`lib/intent.ts` — naye patterns yahan add karo:
+- `routeAction` → naya chat/show signal
+- `parseIntentJS` → naya filter (color, fit)
+- `detectFAQ` → naya business sawaal
+- `availabilityAnswer` → "maal nahi hai" ka naya tarika
