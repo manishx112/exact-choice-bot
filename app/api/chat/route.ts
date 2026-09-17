@@ -21,27 +21,53 @@ import {
   parseOrderQty,
   orderAnswer,
 } from "@/lib/intent";
+import { answerWithSQL, isAnalyticalQuestion, isCountQuestion } from "@/lib/sql";
 import { Intent, Jean } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 const SCRIPT_URL = process.env.APPS_SCRIPT_URL!;
 const GROQ_KEY = process.env.GROQ_API_KEY;
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 async function groq(messages: { role: string; content: string }[], temp: number): Promise<string | null> {
   if (!GROQ_KEY) return null;
+  // customer 8 sec se zyada wait kare, usse achha deterministic reply chala do.
+  // Retry bhi isi 8 sec ke andar — do attempt milke bhi isse lamba nahi.
+  const signal = AbortSignal.timeout(8000);
+  const body = JSON.stringify({
+    model: GROQ_MODEL,
+    temperature: temp,
+    max_tokens: 400,
+    messages,
+    // gpt-oss apni "reasoning" bhi isi token budget me likhta hai — bina
+    // iske 220 token soch me nikal jaate the aur reply beech me kat jaati thi
+    ...(/gpt-oss/.test(GROQ_MODEL) ? { reasoning_effort: "low" } : {}),
+  });
+
   try {
-    const res = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_KEY}` },
-      body: JSON.stringify({ model: GROQ_MODEL, temperature: temp, max_tokens: 220, messages }),
-      // customer 8 sec se zyada wait kare, usse achha deterministic reply chala do
-      signal: AbortSignal.timeout(8000),
-    });
-    const j = await res.json();
-    return j?.choices?.[0]?.message?.content?.trim() || null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const res = await fetch(GROQ_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_KEY}` },
+        body,
+        signal,
+      });
+      const j = await res.json().catch(() => null);
+      if (res.ok) return j?.choices?.[0]?.message?.content?.trim() || null;
+
+      // Pehle yahan non-200 chupchaap null ban jaata tha — model decommission
+      // (404) hafton tak kisi ko pata nahi chala. Ab har failure log me dikhega.
+      console.error(`[groq] http ${res.status} (attempt ${attempt}):`, j?.error?.message || "no body");
+
+      // Free tier = 8000 token/min. Kai customer ek saath aayein toh 429 aata
+      // hai, jo 1-3 sec me khul jaata hai. Ek baar ruk ke dobara try karo.
+      if (res.status !== 429 || attempt === 2) return null;
+      const wait = Math.min(Number(res.headers.get("retry-after")) || 1, 3) * 1000;
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    return null;
   } catch (e) {
     console.error("[groq]", e);
     return null;
@@ -236,6 +262,27 @@ export async function POST(req: Request) {
       const draft = `Bhaiya style #${askedStyle} humari list me nahi mil raha 😅\nStyle number ek baar check kar lijiye.\nYa size aur budget bata dijiye, uske chalte hue design dikha deta hoon.`;
       const reply = await polish(draft, message, historyLines);
       return say(reply, [], prev);
+    }
+
+    // ── ANALYTICS (text → SQL) ──────────────────────────────────────
+    // "kitne style hain", "kis size me sabse zyada maal", "ladies ka average
+    // rate" — ye ginti wale sawaal regex filter kabhi nahi bana sakta. Sirf
+    // yahin LLM SQL likhta hai, aur wo bhi SELECT-only validator ke peeche.
+    // Query reject/fail hui toh chupchaap neeche purana raasta chalta hai.
+    // Dhyan: "show" ko haath nahi lagaya — "sabse sasta dikhao" par purani card
+    // wali chaal hi sahi hai. Sirf saaf ginti ("kitne design hain", bina photo
+    // maange) show se cheen li jaati hai, kyunki uska jawaab number hai.
+    if (
+      !intent.style &&
+      isAnalyticalQuestion(message, !!detectFAQ(message)) &&
+      (action !== "show" || isCountQuestion(message))
+    ) {
+      const ans = await answerWithSQL(message, data, groq);
+      if (ans) {
+        const reply = await polish(ans.draft, message, historyLines);
+        // filter wahi purana rehne do — ginti ka sawaal filter nahi badalta
+        return say(reply, ans.cards, prev);
+      }
     }
 
     // ── CHAT: greeting / thanks / mol-bhaav / FAQ — cards bilkul nahi ──

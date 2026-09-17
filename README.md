@@ -16,8 +16,13 @@ npm run dev                  # http://localhost:3000
 ```
 
 ## Env
-- `APPS_SCRIPT_URL` — tera Apps Script web-app URL (data source)
+- `APPS_SCRIPT_URL` — Apps Script web-app URL (data source)
 - `GROQ_API_KEY` — optional. Na ho toh JS parser chalega (free, instant).
+- `GROQ_MODEL` — default `openai/gpt-oss-120b`. Model decommission ho jaaye toh
+  yahi badalna hai (`curl -H "Authorization: Bearer $KEY" https://api.groq.com/openai/v1/models`
+  se live list mil jaati hai). gpt-oss apni "reasoning" bhi token budget me
+  likhta hai, isliye `route.ts` un par `reasoning_effort: "low"` bhejta hai —
+  warna reply beech me kat jaati hai.
 - `NEXT_PUBLIC_IMG_MODE` — `public` (Drive public link) ya `proxy` (private-safe)
 
 ## ⚠️ Images — 403 fix (public hone pe bhi)
@@ -53,6 +58,7 @@ bolta hai, na har baat par photo thopta hai.
 page.tsx (chat UI)
   → POST /api/chat   { message, prevIntent, history, shownKeys, lastCards }
       → getCatalog()        ← 5 min cache + stale-while-revalidate + in-flight dedup
+      → answerWithSQL()     ← sirf ginti wale sawaal (neeche dekho)
       → routeAction()       ← JS decide karta hai: chat / info / show
       → parseIntentJS()     ← size, rate, gender, style — sab regex se (SOURCE OF TRUTH)
       → filterAll()         ← deterministic filter
@@ -72,6 +78,45 @@ page.tsx (chat UI)
 Inse pehle teen special handler chalte hain (`route.ts` me, upar se neeche):
 `isLastLotQuestion` ("ye kitne ka padega"), `parseOrderQty` ("20 pcs bana do"),
 aur unknown style number.
+
+### Ginti wale sawaal — text → SQL (`lib/sql.ts`)
+"Kitne style hain", "kis size me sabse zyada maal", "ladies ka average rate" —
+in sawaalon ka jawaab card nahi, **number** hai, aur regex filter ye bana hi nahi
+sakta. Iske liye catalog ke upar ek in-memory SQL table (`alasql`) chalti hai:
+
+```
+jeans(style TEXT, size TEXT, rate NUMBER, gender TEXT, img TEXT)
+```
+
+Table `visible()` se banti hai — **Group A yahan tak pahunchta hi nahi**.
+
+SQL do jagah se aata hai, isi tarteeb me:
+
+1. **`templateSQL()` — LLM ke bina.** Rozmarra ke sawaal (total ginti, budget ke
+   neeche ginti, size-wise breakdown, average, sabse sasta/mehnga) yahan fix
+   query se bante hain. `WHERE` `parseIntentJS()` se aata hai — wahi purana
+   source of truth. Isliye ek hi sawaal ka jawaab **har baar bilkul same**.
+2. **LLM SQL — sirf bache hue ajeeb sawaal.** Groq ka free model reliable nahi
+   hai (wahi sawaal par kabhi `COUNT(*)`, kabhi `COUNT(DISTINCT style)`), isliye
+   use aakhri me rakha hai, aur `validateSQL()` ke peeche.
+
+`validateSQL()` ke taale: SELECT se shuru ho, sirf `jeans` table, sirf wo 5
+column (+ `AS` wale alias), har anjaan shabd reject (isi se `DROP` / `INTO FILE`
+/ `ATTACH` / `UNION` apne aap block hain), koi `;` `--` `` ` `` `$`, aur `LIMIT`
+zabardasti (max 200).
+
+Cards **kabhi LLM ke output se nahi bante** — SQL ka `style|size` wapas asli
+catalog row se match karke hi card jaata hai, aur 4 se zyada ho toh bilkul nahi.
+
+Kuch bhi gadbad (Groq band, query reject, alasql error) → `answerWithSQL()` `null`
+lauta deta hai aur purana deterministic raasta chal padta hai. Customer ko error
+kabhi nahi dikhta.
+
+**Gate** (`route.ts`): `show` action ko haath nahi lagaya — "sabse sasta dikhao"
+par purani card wali chaal hi chalti hai. Sirf saaf ginti ("kitne design hain",
+bina photo maange) `show` se cheen li jaati hai. MOQ ka "kitne piece **lena**
+padega" FAQ ke paas hi rehta hai; "gents me kitne pcs **hain**" SQL ke paas
+jaata hai (`ORDER_WORDS` isi ko alag karta hai).
 
 ### Card repeat na ho — teen guard
 1. `shownKeys` — client har dikhaye card ka `style|size` bhejta hai, "aur dikhao"
@@ -96,7 +141,8 @@ Budget **upar** hai ya **neeche** — dono ka jawaab alag hai.
 
 ### Groq band ho toh?
 Sab kuch chalta rahega — `polish()` seedha draft lauta deta hai. Drafts already
-2-3 line ke human Hinglish jawaab hain.
+2-3 line ke human Hinglish jawaab hain. Ginti wale sawaal bhi chalte rahenge,
+kyunki `templateSQL()` ko LLM ki zaroorat hi nahi.
 
 ## Intent tuning
 `lib/intent.ts` — naye patterns yahan add karo:
@@ -104,3 +150,19 @@ Sab kuch chalta rahega — `polish()` seedha draft lauta deta hai. Drafts alread
 - `parseIntentJS` → naya filter (color, fit)
 - `detectFAQ` → naya business sawaal
 - `availabilityAnswer` → "maal nahi hai" ka naya tarika
+
+`lib/sql.ts` — ginti wale sawaal:
+- `AGG` / `isCountQuestion` → naya analytics signal
+- `templateSQL` → naya fix sawaal (LLM ke bina, isi ko pehle try karo)
+- `fmtCell` → naye column ka Hinglish label ("183 design" vs "249 pcs")
+
+## Stack
+Next 16 (Turbopack) · React 19 · Tailwind 4 · TypeScript 7 · alasql 4
+
+Tailwind 4 CSS-first hai — koi `tailwind.config.ts` nahi. Theme badalna ho toh
+`app/globals.css` me `@import "tailwindcss";` ke neeche `@theme { ... }` likho.
+PostCSS plugin `@tailwindcss/postcss` hai, aur autoprefixer usi ke andar built-in
+hai (alag package ki zaroorat nahi).
+
+`next.config.js` me `serverExternalPackages: ["alasql"]` zaroori hai — alasql ke
+andar react-native ke optional require hain, bundle karne par build tootti hai.
