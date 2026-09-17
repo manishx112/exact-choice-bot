@@ -23,6 +23,14 @@ npm run dev                  # http://localhost:3000
   se live list mil jaati hai). gpt-oss apni "reasoning" bhi token budget me
   likhta hai, isliye `route.ts` un par `reasoning_effort: "low"` bhejta hai —
   warna reply beech me kat jaati hai.
+- `GEMINI_API_KEY` — optional backup (aistudio.google.com → API Keys, free tier).
+  `llm()` pehle Groq try karta hai (max 5 sec); Groq **kisi bhi wajah se** fail ho
+  (429, model band, network) toh Gemini. Dono busy hon aur Groq ne 429 diya ho toh
+  1-3 sec ruk ke Groq ek baar aur. Sab milke 8 sec se zyada nahi.
+- `GEMINI_MODEL` — default `gemini-3.1-flash-lite`. Free tier me sirf ~5 request/min,
+  isliye ye main provider nahi hai. **"flash-lite" hi rakho** — `gemini-3-flash-preview`
+  jaise thinking model 400 token soch me uda dete hain aur reply 5 shabd par kat jaati hai.
+  Har failure log me `[groq] http 429: ...` / `[gemini] ...` ki tarah dikhta hai.
 - `NEXT_PUBLIC_IMG_MODE` — `public` (Drive public link) ya `proxy` (private-safe)
 
 ## ⚠️ Images — 403 fix (public hone pe bhi)

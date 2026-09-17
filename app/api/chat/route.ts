@@ -27,51 +27,99 @@ import { Intent, Jean } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 const SCRIPT_URL = process.env.APPS_SCRIPT_URL!;
-const GROQ_KEY = process.env.GROQ_API_KEY;
+// ── LLM providers: pehle Groq, phir Gemini ─────────────────────────────
+// Dono free tier par hain aur dono OpenAI-compatible hain, isliye ek hi
+// request format dono me chalta hai.
+//   Groq   — tez, 1000 request/din, par sirf 8000 token/min (jaldi 429)
+//   Gemini — 250K token/min, par sirf ~5 request/min (isliye backup hai)
+type Msg = { role: string; content: string };
+
+interface Provider {
+  name: string;
+  url: string;
+  key: string | undefined;
+  model: string;
+  extra: Record<string, unknown>;
+}
+
 const GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite";
 
-async function groq(messages: { role: string; content: string }[], temp: number): Promise<string | null> {
-  if (!GROQ_KEY) return null;
-  // customer 8 sec se zyada wait kare, usse achha deterministic reply chala do.
-  // Retry bhi isi 8 sec ke andar — do attempt milke bhi isse lamba nahi.
-  const signal = AbortSignal.timeout(8000);
-  const body = JSON.stringify({
-    model: GROQ_MODEL,
-    temperature: temp,
-    max_tokens: 400,
-    messages,
-    // gpt-oss apni "reasoning" bhi isi token budget me likhta hai — bina
-    // iske 220 token soch me nikal jaate the aur reply beech me kat jaati thi
-    ...(/gpt-oss/.test(GROQ_MODEL) ? { reasoning_effort: "low" } : {}),
-  });
+const GROQ: Provider = {
+  name: "groq",
+  url: "https://api.groq.com/openai/v1/chat/completions",
+  key: process.env.GROQ_API_KEY,
+  model: GROQ_MODEL,
+  // gpt-oss apni "reasoning" bhi isi token budget me likhta hai — bina
+  // iske 220 token soch me nikal jaate the aur reply beech me kat jaati thi
+  extra: /gpt-oss/.test(GROQ_MODEL) ? { reasoning_effort: "low" } : {},
+};
 
+const GEMINI: Provider = {
+  name: "gemini",
+  url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+  key: process.env.GEMINI_API_KEY,
+  // Dhyan: "flash-lite" hi rakho. gemini-3-flash-preview jaise thinking model
+  // 400 token soch me uda dete hain aur reply 5 shabd par kat jaati hai.
+  model: GEMINI_MODEL,
+  extra: {},
+};
+
+type Attempt = { text: string | null; status: number; retryAfter: number };
+
+async function callProvider(p: Provider, messages: Msg[], temp: number, signal: AbortSignal): Promise<Attempt> {
   try {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      const res = await fetch(GROQ_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${GROQ_KEY}` },
-        body,
-        signal,
-      });
-      const j = await res.json().catch(() => null);
-      if (res.ok) return j?.choices?.[0]?.message?.content?.trim() || null;
-
-      // Pehle yahan non-200 chupchaap null ban jaata tha — model decommission
+    const res = await fetch(p.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${p.key}` },
+      body: JSON.stringify({ model: p.model, temperature: temp, max_tokens: 400, messages, ...p.extra }),
+      signal,
+    });
+    const j = await res.json().catch(() => null);
+    const text = res.ok ? j?.choices?.[0]?.message?.content?.trim() || null : null;
+    if (!text) {
+      // Pehle yahan failure chupchaap null ban jaata tha — Groq model decommission
       // (404) hafton tak kisi ko pata nahi chala. Ab har failure log me dikhega.
-      console.error(`[groq] http ${res.status} (attempt ${attempt}):`, j?.error?.message || "no body");
-
-      // Free tier = 8000 token/min. Kai customer ek saath aayein toh 429 aata
-      // hai, jo 1-3 sec me khul jaata hai. Ek baar ruk ke dobara try karo.
-      if (res.status !== 429 || attempt === 2) return null;
-      const wait = Math.min(Number(res.headers.get("retry-after")) || 1, 3) * 1000;
-      await new Promise((r) => setTimeout(r, wait));
+      const why = res.ok ? `empty reply (finish=${j?.choices?.[0]?.finish_reason})` : j?.error?.message || j?.[0]?.error?.message || "no body";
+      console.error(`[${p.name}] http ${res.status}:`, why);
     }
-    return null;
+    return { text, status: res.status, retryAfter: Number(res.headers.get("retry-after")) || 1 };
   } catch (e) {
-    console.error("[groq]", e);
-    return null;
+    console.error(`[${p.name}]`, e);
+    return { text: null, status: 0, retryAfter: 1 };
   }
+}
+
+async function llm(messages: Msg[], temp: number): Promise<string | null> {
+  // customer 8 sec se zyada wait kare, usse achha deterministic reply chala do.
+  // Saare attempt milke bhi isse lamba nahi.
+  const deadline = AbortSignal.timeout(8000);
+
+  // 1) Groq — par max 5 sec, taaki atak jaaye toh Gemini ke liye waqt bache
+  let groqTry: Attempt | null = null;
+  if (GROQ.key) {
+    groqTry = await callProvider(GROQ, messages, temp, AbortSignal.any([deadline, AbortSignal.timeout(5000)]));
+    if (groqTry.text) return groqTry.text;
+  }
+
+  // 2) Groq kisi bhi wajah se fail (429, model band, network) — Gemini
+  if (GEMINI.key && !deadline.aborted) {
+    const g = await callProvider(GEMINI, messages, temp, deadline);
+    if (g.text) {
+      console.info("[llm] groq fail, gemini se jawaab aaya");
+      return g.text;
+    }
+  }
+
+  // 3) Dono busy — Groq ka 429 1-3 sec me khul jaata hai, ek aakhri try
+  if (groqTry?.status === 429 && !deadline.aborted) {
+    await new Promise((r) => setTimeout(r, Math.min(groqTry!.retryAfter, 3) * 1000));
+    if (!deadline.aborted) {
+      const again = await callProvider(GROQ, messages, temp, deadline);
+      if (again.text) return again.text;
+    }
+  }
+  return null;
 }
 
 // ── catalog cache ──────────────────────────────────────────────────
@@ -189,7 +237,7 @@ NIYAM (todna mana hai):
 - Sirf final reply likh, koi explanation nahi.`;
 
   const user = `Pichhli baat:\n${historyLines || "(nayi chat)"}\n\nCustomer: "${message}"\n\nDRAFT:\n${draft}`;
-  const out = await groq([{ role: "system", content: sys }, { role: "user", content: user }], 0.55);
+  const out = await llm([{ role: "system", content: sys }, { role: "user", content: user }], 0.55);
   if (!out) return draft;
   const clean = humanize(out, draft);
   return keepsFacts(clean, draft) ? clean : draft;
@@ -277,7 +325,7 @@ export async function POST(req: Request) {
       isAnalyticalQuestion(message, !!detectFAQ(message)) &&
       (action !== "show" || isCountQuestion(message))
     ) {
-      const ans = await answerWithSQL(message, data, groq);
+      const ans = await answerWithSQL(message, data, llm);
       if (ans) {
         const reply = await polish(ans.draft, message, historyLines);
         // filter wahi purana rehne do — ginti ka sawaal filter nahi badalta
