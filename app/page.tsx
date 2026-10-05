@@ -4,9 +4,16 @@ import { Jean, Intent } from "@/lib/types";
 
 const IMG_MODE = process.env.NEXT_PUBLIC_IMG_MODE || "public";
 
-// public files ke liye multiple formats try karega; proxy mode me apna route.
+// `id` = ImageKit ka poora URL, ya Drive file id (kuch purane rows).
+// Drive: public files ke liye multiple formats try karega; proxy mode me apna route.
 function imgUrls(id: string): string[] {
   if (!id) return [];
+  // ImageKit public CDN hai — proxy ki zaroorat nahi. `tr=w-400` se card ke
+  // size ka chhota version aata hai (410KB → 42KB). Wo na chale toh original.
+  if (/^https?:\/\//i.test(id)) {
+    if (!/imagekit\.io/i.test(id)) return [id];
+    return [`${id}${id.includes("?") ? "&" : "?"}tr=w-400`, id];
+  }
   if (IMG_MODE === "proxy") return [`/api/img?id=${id}`];
   return [
     `https://lh3.googleusercontent.com/d/${id}=w400`,

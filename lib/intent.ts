@@ -4,9 +4,16 @@ import { Jean, Intent } from "./types";
 export function normalize(rows: any[]): Jean[] {
   return rows
     .map((r) => {
-      const idMatch = String(r["Image Upload"] || "").match(/[-\w]{25,}/);
-      // Sheet me filhal "Stock" column hai hi nahi. Blank = UNKNOWN, "out of
-      // stock" NAHI — warna stock filter poora catalog kha jaata hai.
+      // Photo ab ImageKit par hai ("Image Kit Link" = poora URL, browser seedha
+      // load karta hai). Kuch rows abhi bhi Drive link hain, aur purane script me
+      // column ka naam "Image Upload" tha — Drive ho toh sirf file id rakho.
+      const link = String(r["Image Kit Link"] || r["Image Upload"] || "").trim();
+      const img =
+        /^https?:\/\//i.test(link) && !/google\.com/i.test(link)
+          ? link
+          : (link.match(/[-\w]{25,}/) || [""])[0];
+      // Blank Stock = UNKNOWN, "out of stock" NAHI — warna stock filter poora
+      // catalog kha jaata hai.
       const stockRaw = r["Stock"];
       return {
         s: r["Style No."],
@@ -14,7 +21,7 @@ export function normalize(rows: any[]): Jean[] {
         rate: Number(r["Rate"]),
         g: r["Group A & B"],
         stock: stockRaw === "" || stockRaw == null ? null : Number(stockRaw),
-        img: idMatch ? idMatch[0] : "",
+        img,
       } as Jean;
     })
     .filter((r) => r.rate && r.size);
@@ -365,15 +372,35 @@ export function isCatalogQuestion(text: string): boolean {
   );
 }
 
+// "kitne style 450 se mehnge hain" — yahan 450 rate hai, style number nahi.
+// Number ke baad rate wale shabd aayein, ya poora sawaal "kitne style" wali
+// ginti ka ho, toh "style 450" ko style number mat maano. ("#450" pakka tag hai.)
+const RATE_AFTER =
+  /^\s*(se\b|tak\b|rs\b|₹|rupa?y|rupe|ke\s*(upar|neeche|niche|andar)|upar|neeche|niche|range|under|above|below|mehng|sast)/;
+const COUNT_OF_STYLES = /(kitne|kitni|how\s*many|total)\s*(style|design|article)/;
+
+function looksLikeRate(t: string, m: RegExpMatchArray): boolean {
+  return COUNT_OF_STYLES.test(t) || RATE_AFTER.test(t.slice((m.index ?? 0) + m[0].length));
+}
+
 // Customer ne saaf-saaf style number bola ("#17027", "style 1841") — bhale hi
 // wo catalog me na ho. Aisa number mile toh generic jawaab dena galat hai.
 export function taggedStyleNumber(text: string): string | null {
   const t = text.toLowerCase();
-  const m =
-    t.match(/#\s*(\d{3,6})/) ||
-    t.match(/\b(?:style|design|article|art)\s*(?:no\.?|number)?\s*[:#]?\s*(\d{3,6})\b/);
-  return m ? m[1] : null;
+  const hash = t.match(/#\s*(\d{3,6})/);
+  if (hash) return hash[1];
+  const m = t.match(/\b(?:style|design|article|art)\s*(?:no\.?|number)?\s*[:#]?\s*(\d{3,6})\b/);
+  return m && !looksLikeRate(t, m) ? m[1] : null;
 }
+
+// \b zaroori hai — bina uske "female" me "male" aur "women" me "men" match ho
+// jaata tha, aur ladies maangne wale ko gents dikh jaate the.
+const MALE_WORDS = /\b(male|men|mens|men's|boy|boys|gents|munde|mundeya|ladke|ladko|ladka|admi|aadmi)\b/;
+const FEMALE_WORDS = /\b(female|women|womens|women's|girl|girls|ladies|ladis|ladki|ladkiyo|kudi|kudiyan|lady)\b/;
+
+// "ha dikha do" me koi naya filter nahi — par "ladies dikhao" / "sasta dikha do"
+// me hai. Aise message ko sirf haami samjha toh purana gender/budget chipka rehta.
+const NEW_FILTER_WORDS = /(sasta|sasti|cheap|mehng|costly|budget|premium|alag|alawa|doosra|dusra|size|kaun|kya\s*kya)/;
 
 // ── JS intent parser (SOURCE OF TRUTH — filters LLM se nahi aate) ──
 // prev diya toh usi conversation ka context maano — sirf jo field current
@@ -400,7 +427,14 @@ export function parseIntentJS(text: string, prev?: Intent | null, catalog?: Jean
       };
 
   // If user confirms a previous suggestion (e.g. "ha dikha do", "haan")
-  if (isAffirmation(text) && prev && !SIZE_PATTERN.test(t) && !/\d{3,5}/.test(t)) {
+  const pureAffirmation =
+    isAffirmation(text) &&
+    !SIZE_PATTERN.test(t) &&
+    !/\d{3,5}/.test(t) &&
+    !MALE_WORDS.test(t) &&
+    !FEMALE_WORDS.test(t) &&
+    !NEW_FILTER_WORDS.test(t);
+  if (pureAffirmation && prev) {
     if (prev.suggestedRateMin != null && prev.suggestedRateMax != null) {
       it.rateMin = prev.suggestedRateMin;
       it.rateMax = prev.suggestedRateMax;
@@ -410,20 +444,23 @@ export function parseIntentJS(text: string, prev?: Intent | null, catalog?: Jean
     return it;
   }
 
-  if (/(male|men|mens|men's|boy|boys|gents|munde|mundeya|ladke|ladko|ladka|admi|aadmi)/.test(t)) {
-    it.gender = "male";
-    it.saidGender = true;
-  } else if (/(female|women|womens|women's|girl|girls|ladies|ladis|ladki|ladkiyo|kudi|kudiyan|lady)/.test(t)) {
-    it.gender = "female";
+  const saysMale = MALE_WORDS.test(t);
+  const saysFemale = FEMALE_WORDS.test(t);
+  if (saysMale || saysFemale) {
+    // "gents aur ladies dono" = koi gender filter nahi (pehle chupchaap gents ho jaata tha)
+    it.gender = saysMale && saysFemale ? null : saysMale ? "male" : "female";
     it.saidGender = true;
   }
 
-  // "kaun kaun se size hain" = poore stock ka sawaal — purana filter hatao
+  // "kaun kaun se size hain" = poore stock ka sawaal — purana filter hatao.
+  // Gender bhi: pichhle message ka "ladies" chipka toh jawaab sirf ladies ka
+  // aata tha. Haan, "ladies me kaun kaun se size" bola ho toh wo rehne do.
   if (isCatalogQuestion(t)) {
     it.size = null;
     it.excludeSize = null;
     it.rateMin = null;
     it.rateMax = null;
+    if (!it.saidGender) it.gender = null;
   }
 
   const isExclusion = /(alag|alawa|ilaawa|chhod|chhodkar|chhod ke|other than|except|besides)/i.test(t);
@@ -470,9 +507,9 @@ export function parseIntentJS(text: string, prev?: Intent | null, catalog?: Jean
   // ── style/reference number lookup ("#17027", "style 1841 ka rate") ──
   // 3-digit number rate bhi ho sakta hai, isliye catalog me match hona zaroori.
   const styleIds = new Set((catalog || []).map((r) => String(r.s)));
-  const tagged =
-    t.match(/#\s*(\d{3,6})/) ||
-    t.match(/\b(?:style|design|article|art|number)\s*(?:no\.?|number)?\s*[:#]?\s*(\d{3,6})\b/);
+  // 956, 961 jaise 3-digit style bhi hain — "style 956 se mehnge" me rate hai
+  const wordTag = t.match(/\b(?:style|design|article|art|number)\s*(?:no\.?|number)?\s*[:#]?\s*(\d{3,6})\b/);
+  const tagged = t.match(/#\s*(\d{3,6})/) || (wordTag && !looksLikeRate(t, wordTag) ? wordTag : null);
   let styleHit: string | null = null;
   if (tagged && (styleIds.size === 0 || styleIds.has(tagged[1]))) {
     styleHit = tagged[1];

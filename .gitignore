@@ -17,3 +17,6 @@ next-env.d.ts
 # misc
 .DS_Store
 *.log
+
+# local Claude Code preview config
+/.claude/

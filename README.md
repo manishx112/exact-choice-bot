@@ -4,9 +4,11 @@ Delhi/UP wholesale expert persona jeans chat bot. Size + rate samajh ke live she
 product cards dikhata hai. Data ka source-of-truth deterministic filter hai —
 LLM sirf reply ko human banata hai, rate/size/count kabhi khud nahi banata.
 
-> ⚠️ Sheet me **Stock column hai hi nahi**. Isliye "stock hai kya" ko availability
-> ka sawaal maana jaata hai, filter nahi. (Pehle ye filter poora catalog kha jaata
-> tha aur bot har baar "kuch nahi mila" bolta tha.)
+> ⚠️ Naye sheet me **Stock column aa gaya hai** (kai rows me blank bhi hai), par
+> filter abhi **band** hai — `parseIntentJS` `inStock` hamesha `false` rakhta hai.
+> Blank stock ko "khatam" maan liya toh filter poora catalog kha jaata hai aur bot
+> har baar "kuch nahi mila" bolta hai. Stock 0 wale design hatane hain toh yahi
+> chalu karna hai (`filterAll` blank ko pehle se "pata nahi" maanta hai).
 
 ## Setup
 ```bash
@@ -16,22 +18,42 @@ npm run dev                  # http://localhost:3000
 ```
 
 ## Env
-- `APPS_SCRIPT_URL` — Apps Script web-app URL (data source)
-- `GROQ_API_KEY` — optional. Na ho toh JS parser chalega (free, instant).
+- `APPS_SCRIPT_URL` — Apps Script web-app URL (data source). Comma se backup URL
+  bhi de sakte ho: pehla 404 / timeout de toh doosra. Fail hua URL 10 min skip
+  hota hai (404 wala deployment bhi ~30 sec laga ke mana karta hai). Script ~10-30
+  sec leta hai, isliye fetch ka timeout 60 sec hai. Asli URL `.env.example` me
+  commit mat karna — usse poora catalog, Group A samet, koi bhi khol sakta hai.
+- `GEMINI_API_KEY` — optional (aistudio.google.com → API Keys, free tier).
+- `GEMINI_MODELS` — comma se alag ki hui list, **order hi priority hai**.
+  Default `gemini-3.5-flash-lite,gemini-3.1-flash-lite`.
+  Pehla model fail (404 band / 429 quota / 503 busy / 3 sec me jawaab nahi) toh
+  doosra. Free tier me har model ka quota alag hai (15 request/min), isliye list
+  chalti hai. **`-latest` wale naam mat daalo** — `gemini-flash-lite-latest` asal
+  me `gemini-3.5-flash-lite` hi hai, usi ka quota khata hai. **"flash-lite" hi
+  rakho** — bade aur thinking model 8-12 sec lete hain aur reply beech me kat
+  jaati hai. 1.5 / 2.0 / 2.5 wale sab band ho chuke hain (404 "no longer available").
+- `GROQ_API_KEY` — optional, **aakhri sahara**. Gemini ka koi model na chale
+  tabhi chalta hai, aur ~1 sec me jawaab de deta hai.
 - `GROQ_MODEL` — default `openai/gpt-oss-120b`. Model decommission ho jaaye toh
   yahi badalna hai (`curl -H "Authorization: Bearer $KEY" https://api.groq.com/openai/v1/models`
   se live list mil jaati hai). gpt-oss apni "reasoning" bhi token budget me
   likhta hai, isliye `route.ts` un par `reasoning_effort: "low"` bhejta hai —
   warna reply beech me kat jaati hai.
-- `GEMINI_API_KEY` — optional backup (aistudio.google.com → API Keys, free tier).
-  `llm()` pehle Groq try karta hai (max 5 sec); Groq **kisi bhi wajah se** fail ho
-  (429, model band, network) toh Gemini. Dono busy hon aur Groq ne 429 diya ho toh
-  1-3 sec ruk ke Groq ek baar aur. Sab milke 8 sec se zyada nahi.
-- `GEMINI_MODEL` — default `gemini-3.1-flash-lite`. Free tier me sirf ~5 request/min,
-  isliye ye main provider nahi hai. **"flash-lite" hi rakho** — `gemini-3-flash-preview`
-  jaise thinking model 400 token soch me uda dete hain aur reply 5 shabd par kat jaati hai.
-  Har failure log me `[groq] http 429: ...` / `[gemini] ...` ki tarah dikhta hai.
-- `NEXT_PUBLIC_IMG_MODE` — `public` (Drive public link) ya `proxy` (private-safe)
+- Poora ladder: Gemini model 1 → model 2 → Groq (Groq ke liye 3 sec hamesha bache rehte hain; 429 mile toh 1-3 sec
+  ruk ke ek aakhri try) → sab fail toh seedha draft. Sab milke 8 sec se zyada
+  nahi. Fail hua model thodi der ke liye "bench" ho jaata hai (404 → restart
+  tak, 429 → 60 sec, 503 → 30 sec), taaki har message par wahi galti dobara na
+  ho. Har failure log me `[gemini:<model>] http 429: ...` / `[groq] ...` dikhta hai.
+- `NEXT_PUBLIC_IMG_MODE` — sirf bache hue **Drive** photos ke liye: `public`
+  (Drive public link) ya `proxy` (private-safe)
+
+## Images — ImageKit
+Sheet ka `Image Kit Link` column ab seedha ImageKit URL deta hai
+(`https://ik.imagekit.io/.../17027_32X36_MALE_R500.jpeg`). Browser use seedha
+load karta hai — proxy nahi chahiye. Card par `?tr=w-400` lagta hai, jisse ImageKit
+chhota version bhejta hai (410KB → 42KB); wo fail ho toh original URL.
+Jo rows abhi Drive link hain (aur purana script, jiska column `Image Upload` tha)
+wo neeche wale Drive raaste se hi chalti hain — `normalize()` dono samajhta hai.
 
 ## ⚠️ Images — 403 fix (public hone pe bhi)
 

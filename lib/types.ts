@@ -4,7 +4,7 @@ export interface Jean {
   rate: number;
   g: string;            // group A / B / Male
   stock: number | null; // null = unknown/blank
-  img: string;          // drive file id
+  img: string;          // ImageKit ka poora URL, ya (purane rows me) Drive file id
 }
 
 export interface Intent {
